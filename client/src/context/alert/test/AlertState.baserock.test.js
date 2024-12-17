@@ -1,30 +1,28 @@
 import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
 import React from 'react';
-import { render } from '@testing-library/react';
-import { v4 as uuid } from 'uuid';
+import { render, act } from '@testing-library/react';
 import AlertState from '../../../../src/context/alert/AlertState';
 import AlertContext from '../../../../src/context/alert/alertContext';
 import { SET_ALERT, REMOVE_ALERT } from '../../../../src/context/types';
 
-// Mock the required modules
-jest.mock('react', () => ({
-  ...jest.requireActual('react'),
-  useReducer: jest.fn(),
+// Mock uuid module
+jest.mock('uuid', () => ({
+  v4: () => 'test-uuid'
 }));
 
-jest.mock('uuid', () => ({
-  v4: jest.fn(() => 'test-uuid'),
+// Mock React's useReducer
+const mockDispatch = jest.fn();
+let mockState = [];
+jest.mock('react', () => ({
+  ...jest.requireActual('react'),
+  useReducer: () => [mockState, mockDispatch]
 }));
 
 describe('AlertState', () => {
-  let mockDispatch;
-  let mockState;
-
   beforeEach(() => {
     jest.useFakeTimers();
-    mockDispatch = jest.fn();
     mockState = [];
-    React.useReducer.mockReturnValue([mockState, mockDispatch]);
+    mockDispatch.mockClear();
   });
 
   afterEach(() => {
@@ -47,19 +45,17 @@ describe('AlertState', () => {
       </AlertState>
     );
 
-    // Check initial dispatch for setting alert
     expect(mockDispatch).toHaveBeenCalledWith({
       type: SET_ALERT,
       payload: { message: 'Test message', type: 'success', id: 'test-uuid' }
     });
 
-    // Verify timeout was set
     expect(setTimeout).toHaveBeenCalledWith(expect.any(Function), 2000);
 
-    // Run all timers to trigger alert removal
-    jest.runAllTimers();
+    act(() => {
+      jest.runAllTimers();
+    });
 
-    // Check dispatch for removing alert
     expect(mockDispatch).toHaveBeenCalledWith({
       type: REMOVE_ALERT,
       payload: 'test-uuid'
@@ -81,7 +77,6 @@ describe('AlertState', () => {
       </AlertState>
     );
 
-    // Verify default timeout
     expect(setTimeout).toHaveBeenCalledWith(expect.any(Function), 3000);
   });
 
@@ -95,5 +90,22 @@ describe('AlertState', () => {
     );
 
     expect(getByText('Test Child')).toBeInTheDocument();
+  });
+
+  it('should provide alerts state through context', () => {
+    mockState = [{ id: '1', message: 'Test Alert', type: 'info' }];
+
+    const TestComponent = () => {
+      const { alerts } = React.useContext(AlertContext);
+      return <div>{alerts[0].message}</div>;
+    };
+
+    const { getByText } = render(
+      <AlertState>
+        <TestComponent />
+      </AlertState>
+    );
+
+    expect(getByText('Test Alert')).toBeInTheDocument();
   });
 });

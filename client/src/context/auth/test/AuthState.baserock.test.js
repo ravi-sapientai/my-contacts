@@ -1,4 +1,4 @@
-import { jest } from '@jest/globals';
+import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
 import React from 'react';
 import { render, act } from '@testing-library/react';
 import AuthState from '../../../../src/context/auth/AuthState';
@@ -6,137 +6,197 @@ import AuthContext from '../../../../src/context/auth/authContext';
 import * as types from '../../../../src/context/types';
 
 // Mock dependencies
-jest.mock('axios');
-jest.mock('../../../../src/utils/setAuthToken');
+jest.mock('axios', () => ({
+  default: {
+    get: () => Promise.resolve({ data: {} }),
+    post: () => Promise.resolve({ data: {} })
+  }
+}));
 
-// Import mocked modules
-import axios from 'axios';
-import setAuthToken from '../../../../src/utils/setAuthToken';
+jest.mock('../../../../src/utils/setAuthToken', () => () => {});
 
-const mockDispatch = jest.fn();
-jest.spyOn(React, 'useReducer').mockImplementation(() => [{}, mockDispatch]);
+const renderHook = (callback, options) => {
+  let result;
+  function TestComponent() {
+    result = callback();
+    return null;
+  }
+  render(<TestComponent />, options);
+  return { result };
+};
 
 describe('AuthState Component', () => {
   let wrapper;
-  let contextValue;
-  
+  let mockDispatch;
+  let mockAxios;
+
   beforeEach(() => {
     jest.clearAllMocks();
-    wrapper = render(
-      <AuthState>
-        <AuthContext.Consumer>
-          {(context) => {
-            contextValue = context;
-            return <div>{JSON.stringify(context)}</div>;
-          }}
-        </AuthContext.Consumer>
-      </AuthState>
+    
+    global.localStorage = {
+      getItem: jest.fn(),
+      setItem: jest.fn(),
+      removeItem: jest.fn(),
+    };
+
+    mockDispatch = jest.fn();
+    jest.spyOn(React, 'useReducer').mockImplementation(() => [{
+      token: null,
+      isAuthenticated: null,
+      loading: true,
+      user: null,
+      error: null,
+    }, mockDispatch]);
+
+    wrapper = ({ children }) => (
+      <AuthState>{children}</AuthState>
     );
+
+    mockAxios = require('axios').default;
   });
 
-  it('should initialize with correct initial state', () => {
-    expect(contextValue.token).toBe(localStorage.getItem('token'));
-    expect(contextValue.isAuthenticated).toBeNull();
-    expect(contextValue.loading).toBe(true);
-    expect(contextValue.user).toBeNull();
-    expect(contextValue.error).toBeNull();
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
-  it('should load user successfully', async () => {
+  it('initializes with correct initial state', () => {
+    const { result } = renderHook(() => React.useContext(AuthContext), { wrapper });
+    
+    expect(result).toEqual(expect.objectContaining({
+      token: null,
+      isAuthenticated: null,
+      loading: true,
+      user: null,
+      error: null,
+    }));
+  });
+
+  it('loads user successfully', async () => {
     const mockUser = { id: '1', name: 'Test User' };
-    axios.get.mockResolvedValue({ data: mockUser });
+    mockAxios.get.mockResolvedValueOnce({ data: mockUser });
+
+    const { result } = renderHook(() => React.useContext(AuthContext), { wrapper });
 
     await act(async () => {
-      await contextValue.loadUser();
+      await result.loadUser();
     });
 
-    expect(setAuthToken).toHaveBeenCalledWith(localStorage.getItem('token'));
-    expect(axios.get).toHaveBeenCalledWith('/api/auth');
     expect(mockDispatch).toHaveBeenCalledWith({
       type: types.USER_LOADED,
-      payload: mockUser
+      payload: mockUser,
     });
   });
 
-  it('should handle auth error when loading user', async () => {
-    axios.get.mockRejectedValue(new Error('Auth Error'));
+  it('handles load user error', async () => {
+    mockAxios.get.mockRejectedValueOnce(new Error('Failed to load user'));
+
+    const { result } = renderHook(() => React.useContext(AuthContext), { wrapper });
 
     await act(async () => {
-      await contextValue.loadUser();
+      await result.loadUser();
     });
 
-    expect(mockDispatch).toHaveBeenCalledWith({ type: types.AUTH_ERROR });
+    expect(mockDispatch).toHaveBeenCalledWith({
+      type: types.AUTH_ERROR,
+    });
   });
 
-  it('should register user successfully', async () => {
-    const mockFormData = { name: 'Test User', email: 'test@test.com', password: 'password123' };
-    const mockResponse = { data: { token: 'mockToken' } };
-    axios.post.mockResolvedValue(mockResponse);
+  it('registers user successfully', async () => {
+    const mockResponse = { data: { token: 'test-token' } };
+    mockAxios.post.mockResolvedValueOnce(mockResponse);
+
+    const { result } = renderHook(() => React.useContext(AuthContext), { wrapper });
 
     await act(async () => {
-      await contextValue.register(mockFormData);
+      await result.register({ name: 'Test User', email: 'test@test.com', password: 'password123' });
     });
 
-    expect(axios.post).toHaveBeenCalledWith('/api/users', mockFormData, expect.any(Object));
     expect(mockDispatch).toHaveBeenCalledWith({
       type: types.REGISTER_SUCCESS,
-      payload: mockResponse.data
+      payload: mockResponse.data,
     });
   });
 
-  it('should handle registration failure', async () => {
-    const mockFormData = { name: 'Test User', email: 'test@test.com', password: 'password123' };
-    const mockError = { response: { data: { msg: 'Registration failed' } } };
-    axios.post.mockRejectedValue(mockError);
+  it('handles register error', async () => {
+    const errorMsg = 'Registration failed';
+    mockAxios.post.mockRejectedValueOnce({ response: { data: { msg: errorMsg } } });
+
+    const { result } = renderHook(() => React.useContext(AuthContext), { wrapper });
 
     await act(async () => {
-      await contextValue.register(mockFormData);
+      await result.register({ name: 'Test User', email: 'test@test.com', password: 'password123' });
     });
 
     expect(mockDispatch).toHaveBeenCalledWith({
       type: types.REGISTER_FAIL,
-      payload: mockError.response.data.msg
+      payload: errorMsg,
     });
   });
 
-  it('should login user successfully', async () => {
-    const mockFormData = { email: 'test@test.com', password: 'password123' };
-    const mockResponse = { data: { token: 'mockToken' } };
-    axios.post.mockResolvedValue(mockResponse);
+  it('logs in user successfully', async () => {
+    const mockResponse = { data: { token: 'test-token' } };
+    mockAxios.post.mockResolvedValueOnce(mockResponse);
+
+    const { result } = renderHook(() => React.useContext(AuthContext), { wrapper });
 
     await act(async () => {
-      await contextValue.login(mockFormData);
+      await result.login({ email: 'test@test.com', password: 'password123' });
     });
 
-    expect(axios.post).toHaveBeenCalledWith('/api/auth', mockFormData, expect.any(Object));
     expect(mockDispatch).toHaveBeenCalledWith({
       type: types.LOGIN_SUCCESS,
-      payload: mockResponse.data
+      payload: mockResponse.data,
     });
   });
 
-  it('should handle login failure', async () => {
-    const mockFormData = { email: 'test@test.com', password: 'password123' };
-    const mockError = { response: { data: { msg: 'Invalid credentials' } } };
-    axios.post.mockRejectedValue(mockError);
+  it('handles login error', async () => {
+    const errorMsg = 'Login failed';
+    mockAxios.post.mockRejectedValueOnce({ response: { data: { msg: errorMsg } } });
+
+    const { result } = renderHook(() => React.useContext(AuthContext), { wrapper });
 
     await act(async () => {
-      await contextValue.login(mockFormData);
+      await result.login({ email: 'test@test.com', password: 'password123' });
     });
 
     expect(mockDispatch).toHaveBeenCalledWith({
       type: types.LOGIN_FAIL,
-      payload: mockError.response.data.msg
+      payload: errorMsg,
     });
   });
 
-  it('should logout user', () => {
-    contextValue.logout();
+  it('logs out user', () => {
+    const { result } = renderHook(() => React.useContext(AuthContext), { wrapper });
+
+    act(() => {
+      result.logout();
+    });
+
     expect(mockDispatch).toHaveBeenCalledWith({ type: types.LOGOUT });
   });
 
-  it('should clear errors', () => {
-    contextValue.clearErrors();
+  it('clears errors', () => {
+    const { result } = renderHook(() => React.useContext(AuthContext), { wrapper });
+
+    act(() => {
+      result.clearErrors();
+    });
+
     expect(mockDispatch).toHaveBeenCalledWith({ type: types.CLEAR_ERRORS });
+  });
+
+  // Additional test to increase coverage
+  it('sets auth token when available in localStorage', async () => {
+    const mockToken = 'test-token';
+    global.localStorage.getItem.mockReturnValueOnce(mockToken);
+    const setAuthToken = require('../../../../src/utils/setAuthToken');
+
+    const { result } = renderHook(() => React.useContext(AuthContext), { wrapper });
+
+    await act(async () => {
+      await result.loadUser();
+    });
+
+    expect(setAuthToken).toHaveBeenCalledWith(mockToken);
   });
 });

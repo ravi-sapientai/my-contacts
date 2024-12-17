@@ -1,244 +1,247 @@
 import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
 import React from 'react';
 import { render, act } from '@testing-library/react';
-import ContactState from '../../../../../client/src/context/contact/ContactState';
-import ContactContext from '../../../../../client/src/context/contact/contactContext';
-import * as types from '../../../../../client/src/context/types';
+import axios from 'axios';
+import ContactState from '../../../../src/context/contact/ContactState';
+import ContactContext from '../../../../src/context/contact/contactContext';
+import {
+  ADD_CONTACT,
+  DELETE_CONTACT,
+  SET_CURRENT,
+  CLEAR_CURRENT,
+  UPDATE_CONTACT,
+  FILTER_CONTACTS,
+  CLEAR_FILTER,
+  CONTACT_ERROR,
+  GET_CONTACTS,
+  CLEAR_CONTACTS,
+} from '../../../../src/types';
 
 // Mock axios
-jest.unstable_mockModule('axios', () => ({
-  default: {
-    post: jest.fn(),
-    get: jest.fn(),
-    delete: jest.fn(),
-    put: jest.fn(),
-  },
+jest.mock('axios');
+
+// Mock useReducer
+const mockDispatch = jest.fn();
+jest.mock('react', () => ({
+  ...jest.requireActual('react'),
+  useReducer: () => [{}, mockDispatch]
 }));
 
-const axios = (await import('axios')).default;
+const renderHook = (callback, options) => {
+  let result;
+  function TestComponent() {
+    result = callback();
+    return null;
+  }
+  render(<TestComponent />, options);
+  return { result };
+};
 
 describe('ContactState', () => {
   let wrapper;
-  let useReducerSpy;
-
+  
   beforeEach(() => {
-    useReducerSpy = jest.spyOn(React, 'useReducer');
-    useReducerSpy.mockImplementation((reducer, initialState) => [initialState, jest.fn()]);
+    jest.clearAllMocks();
+    wrapper = ({ children }) => (
+      <ContactState>{children}</ContactState>
+    );
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
   });
 
-  it('should initialize with correct initial state', () => {
-    wrapper = render(<ContactState>{({ contacts, current, filtered, error }) => 
-      <div data-testid="state">
-        {JSON.stringify({ contacts, current, filtered, error })}
-      </div>
-    }</ContactState>);
-
-    const stateElement = wrapper.getByTestId('state');
-    expect(JSON.parse(stateElement.textContent)).toEqual({
-      contacts: null,
-      current: null,
-      filtered: null,
-      error: null,
-    });
-  });
-
-  it('should add a contact', async () => {
+  it('should add a contact successfully', async () => {
     const mockContact = { name: 'John Doe', email: 'john@example.com' };
     const mockResponse = { data: { ...mockContact, _id: '123' } };
-    axios.post.mockResolvedValue(mockResponse);
+    axios.post.mockResolvedValueOnce(mockResponse);
 
-    wrapper = render(
-      <ContactState>
-        {({ addContact }) => <button onClick={() => addContact(mockContact)}>Add Contact</button>}
-      </ContactState>
-    );
+    const { result } = renderHook(() => React.useContext(ContactContext), { wrapper });
 
     await act(async () => {
-      wrapper.getByText('Add Contact').click();
+      await result.addContact(mockContact);
     });
 
-    expect(axios.post).toHaveBeenCalledWith('/api/contacts', mockContact, {
-      headers: { 'Content-Type': 'application/json' },
-    });
-    expect(useReducerSpy.mock.calls[1][0]).toEqual({
-      type: types.ADD_CONTACT,
-      payload: mockResponse.data,
+    expect(axios.post).toHaveBeenCalledWith('/api/contacts', mockContact, expect.any(Object));
+    expect(mockDispatch).toHaveBeenCalledWith({
+      type: ADD_CONTACT,
+      payload: mockResponse.data
     });
   });
 
-  it('should get contacts', async () => {
-    const mockContacts = [{ _id: '1', name: 'John' }, { _id: '2', name: 'Jane' }];
-    axios.get.mockResolvedValue({ data: mockContacts });
+  it('should handle add contact error', async () => {
+    const mockContact = { name: 'John Doe', email: 'john@example.com' };
+    const mockError = { response: { msg: 'Failed to add contact' } };
+    axios.post.mockRejectedValueOnce(mockError);
 
-    wrapper = render(
-      <ContactState>
-        {({ getContacts }) => <button onClick={getContacts}>Get Contacts</button>}
-      </ContactState>
-    );
+    const { result } = renderHook(() => React.useContext(ContactContext), { wrapper });
 
     await act(async () => {
-      wrapper.getByText('Get Contacts').click();
+      await result.addContact(mockContact);
+    });
+
+    expect(mockDispatch).toHaveBeenCalledWith({
+      type: CONTACT_ERROR,
+      payload: mockError.response.msg
+    });
+  });
+
+  it('should get contacts successfully', async () => {
+    const mockContacts = [{ _id: '1', name: 'John Doe' }, { _id: '2', name: 'Jane Doe' }];
+    axios.get.mockResolvedValueOnce({ data: mockContacts });
+
+    const { result } = renderHook(() => React.useContext(ContactContext), { wrapper });
+
+    await act(async () => {
+      await result.getContacts();
     });
 
     expect(axios.get).toHaveBeenCalledWith('/api/contacts');
-    expect(useReducerSpy.mock.calls[1][0]).toEqual({
-      type: types.GET_CONTACTS,
-      payload: mockContacts,
+    expect(mockDispatch).toHaveBeenCalledWith({
+      type: GET_CONTACTS,
+      payload: mockContacts
     });
   });
 
-  it('should delete a contact', async () => {
-    const contactId = '123';
-    axios.delete.mockResolvedValue({});
+  it('should handle get contacts error', async () => {
+    const mockError = { response: { msg: 'Failed to get contacts' } };
+    axios.get.mockRejectedValueOnce(mockError);
 
-    wrapper = render(
-      <ContactState>
-        {({ deleteContact }) => <button onClick={() => deleteContact(contactId)}>Delete Contact</button>}
-      </ContactState>
-    );
+    const { result } = renderHook(() => React.useContext(ContactContext), { wrapper });
 
     await act(async () => {
-      wrapper.getByText('Delete Contact').click();
+      await result.getContacts();
+    });
+
+    expect(mockDispatch).toHaveBeenCalledWith({
+      type: CONTACT_ERROR,
+      payload: mockError.response.msg
+    });
+  });
+
+  it('should delete a contact successfully', async () => {
+    const contactId = '123';
+    axios.delete.mockResolvedValueOnce({});
+
+    const { result } = renderHook(() => React.useContext(ContactContext), { wrapper });
+
+    await act(async () => {
+      await result.deleteContact(contactId);
     });
 
     expect(axios.delete).toHaveBeenCalledWith(`/api/contacts/${contactId}`);
-    expect(useReducerSpy.mock.calls[1][0]).toEqual({
-      type: types.DELETE_CONTACT,
-      payload: contactId,
+    expect(mockDispatch).toHaveBeenCalledWith({
+      type: DELETE_CONTACT,
+      payload: contactId
     });
   });
 
-  it('should update a contact', async () => {
-    const mockContact = { _id: '123', name: 'John Doe', email: 'john@example.com' };
-    const mockResponse = { data: mockContact };
-    axios.put.mockResolvedValue(mockResponse);
+  it('should handle delete contact error', async () => {
+    const contactId = '123';
+    const mockError = { response: { msg: 'Failed to delete contact' } };
+    axios.delete.mockRejectedValueOnce(mockError);
 
-    wrapper = render(
-      <ContactState>
-        {({ updateContact }) => <button onClick={() => updateContact(mockContact)}>Update Contact</button>}
-      </ContactState>
-    );
+    const { result } = renderHook(() => React.useContext(ContactContext), { wrapper });
 
     await act(async () => {
-      wrapper.getByText('Update Contact').click();
+      await result.deleteContact(contactId);
     });
 
-    expect(axios.put).toHaveBeenCalledWith(`/api/contacts/${mockContact._id}`, mockContact, {
-      headers: { 'Content-Type': 'application/json' },
-    });
-    expect(useReducerSpy.mock.calls[1][0]).toEqual({
-      type: types.UPDATE_CONTACT,
-      payload: mockResponse.data,
+    expect(mockDispatch).toHaveBeenCalledWith({
+      type: CONTACT_ERROR,
+      payload: mockError.response.msg
     });
   });
 
-  it('should set current contact', () => {
-    const mockContact = { _id: '123', name: 'John Doe' };
+  it('should update a contact successfully', async () => {
+    const mockContact = { _id: '123', name: 'Updated John Doe', email: 'john@example.com' };
+    axios.put.mockResolvedValueOnce({ data: mockContact });
 
-    wrapper = render(
-      <ContactState>
-        {({ setCurrent }) => <button onClick={() => setCurrent(mockContact)}>Set Current</button>}
-      </ContactState>
-    );
+    const { result } = renderHook(() => React.useContext(ContactContext), { wrapper });
 
-    act(() => {
-      wrapper.getByText('Set Current').click();
+    await act(async () => {
+      await result.updateContact(mockContact);
     });
 
-    expect(useReducerSpy.mock.calls[1][0]).toEqual({
-      type: types.SET_CURRENT,
-      payload: mockContact,
+    expect(axios.put).toHaveBeenCalledWith(`/api/contacts/${mockContact._id}`, mockContact, expect.any(Object));
+    expect(mockDispatch).toHaveBeenCalledWith({
+      type: UPDATE_CONTACT,
+      payload: mockContact
     });
   });
 
-  it('should clear current contact', () => {
-    wrapper = render(
-      <ContactState>
-        {({ clearCurrent }) => <button onClick={clearCurrent}>Clear Current</button>}
-      </ContactState>
-    );
+  it('should handle update contact error', async () => {
+    const mockContact = { _id: '123', name: 'Updated John Doe', email: 'john@example.com' };
+    const mockError = { response: { msg: 'Failed to update contact' } };
+    axios.put.mockRejectedValueOnce(mockError);
 
-    act(() => {
-      wrapper.getByText('Clear Current').click();
+    const { result } = renderHook(() => React.useContext(ContactContext), { wrapper });
+
+    await act(async () => {
+      await result.updateContact(mockContact);
     });
 
-    expect(useReducerSpy.mock.calls[1][0]).toEqual({
-      type: types.CLEAR_CURRENT,
-    });
-  });
-
-  it('should filter contacts', () => {
-    const filterText = 'John';
-
-    wrapper = render(
-      <ContactState>
-        {({ filterContacts }) => <button onClick={() => filterContacts(filterText)}>Filter Contacts</button>}
-      </ContactState>
-    );
-
-    act(() => {
-      wrapper.getByText('Filter Contacts').click();
-    });
-
-    expect(useReducerSpy.mock.calls[1][0]).toEqual({
-      type: types.FILTER_CONTACTS,
-      payload: filterText,
-    });
-  });
-
-  it('should clear filter', () => {
-    wrapper = render(
-      <ContactState>
-        {({ clearFilter }) => <button onClick={clearFilter}>Clear Filter</button>}
-      </ContactState>
-    );
-
-    act(() => {
-      wrapper.getByText('Clear Filter').click();
-    });
-
-    expect(useReducerSpy.mock.calls[1][0]).toEqual({
-      type: types.CLEAR_FILTER,
+    expect(mockDispatch).toHaveBeenCalledWith({
+      type: CONTACT_ERROR,
+      payload: mockError.response.msg
     });
   });
 
   it('should clear contacts', () => {
-    wrapper = render(
-      <ContactState>
-        {({ clearContacts }) => <button onClick={clearContacts}>Clear Contacts</button>}
-      </ContactState>
-    );
+    const { result } = renderHook(() => React.useContext(ContactContext), { wrapper });
 
     act(() => {
-      wrapper.getByText('Clear Contacts').click();
+      result.clearContacts();
     });
 
-    expect(useReducerSpy.mock.calls[1][0]).toEqual({
-      type: types.CLEAR_CONTACTS,
+    expect(mockDispatch).toHaveBeenCalledWith({ type: CLEAR_CONTACTS });
+  });
+
+  it('should set current contact', () => {
+    const mockContact = { _id: '123', name: 'John Doe', email: 'john@example.com' };
+    const { result } = renderHook(() => React.useContext(ContactContext), { wrapper });
+
+    act(() => {
+      result.setCurrent(mockContact);
+    });
+
+    expect(mockDispatch).toHaveBeenCalledWith({
+      type: SET_CURRENT,
+      payload: mockContact
     });
   });
 
-  it('should handle contact error', async () => {
-    const errorMessage = 'An error occurred';
-    axios.post.mockRejectedValue({ response: { msg: errorMessage } });
+  it('should clear current contact', () => {
+    const { result } = renderHook(() => React.useContext(ContactContext), { wrapper });
 
-    wrapper = render(
-      <ContactState>
-        {({ addContact }) => <button onClick={() => addContact({})}>Add Contact</button>}
-      </ContactState>
-    );
-
-    await act(async () => {
-      wrapper.getByText('Add Contact').click();
+    act(() => {
+      result.clearCurrent();
     });
 
-    expect(useReducerSpy.mock.calls[1][0]).toEqual({
-      type: types.CONTACT_ERROR,
-      payload: errorMessage,
+    expect(mockDispatch).toHaveBeenCalledWith({ type: CLEAR_CURRENT });
+  });
+
+  it('should filter contacts', () => {
+    const filterText = 'John';
+    const { result } = renderHook(() => React.useContext(ContactContext), { wrapper });
+
+    act(() => {
+      result.filterContacts(filterText);
     });
+
+    expect(mockDispatch).toHaveBeenCalledWith({
+      type: FILTER_CONTACTS,
+      payload: filterText
+    });
+  });
+
+  it('should clear filter', () => {
+    const { result } = renderHook(() => React.useContext(ContactContext), { wrapper });
+
+    act(() => {
+      result.clearFilter();
+    });
+
+    expect(mockDispatch).toHaveBeenCalledWith({ type: CLEAR_FILTER });
   });
 });

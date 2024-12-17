@@ -1,67 +1,55 @@
-import { render, fireEvent, waitFor } from '@testing-library/react';
+import React from 'react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import * as React from 'react'
+import Login from '../../../../src/components/auth/Login';
 
 // Mock the context hooks
-jest.mock('../../../context/alert/alertContext', () => {
-  const React = require('react');
-  return {
-    __esModule: true,
-    default: React.createContext(null),
-  };
-});
-
-jest.mock('../../../context/auth/authContext', () => {
-  const React = require('react');
-  return {
-    __esModule: true,
-    default: React.createContext(null),
-  };
-});
-
 const mockSetAlert = jest.fn();
 const mockLogin = jest.fn();
 const mockClearErrors = jest.fn();
-const mockHistoryPush = jest.fn();
 
-const mockUseContext = jest.fn().mockImplementation((context) => {
-  if (context.displayName === 'AlertContext') {
-    return { setAlert: mockSetAlert };
-  }
-  if (context.displayName === 'AuthContext') {
-    return {
-      login: mockLogin,
-      error: null,
-      clearErrors: mockClearErrors,
-      isAuthenticated: false,
-    };
-  }
-});
-
-const actualReact = jest.requireActual('react');
-jest.mock('react', () => ({
-  ...actualReact,
-  useContext: mockUseContext,
+jest.mock('../../../../src/context/alert/alertContext', () => ({
+  __esModule: true,
+  default: React.createContext({
+    setAlert: mockSetAlert,
+  }),
 }));
 
-import Login from '../../../../src/components/auth/Login';
+jest.mock('../../../../src/context/auth/authContext', () => ({
+  __esModule: true,
+  default: React.createContext({
+    login: mockLogin,
+    error: null,
+    clearErrors: mockClearErrors,
+    isAuthenticated: false,
+  }),
+}));
+
+// Mock the history object
+const mockHistoryPush = jest.fn();
+const props = {
+  history: {
+    push: mockHistoryPush,
+  },
+};
 
 describe('Login Component', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it('renders without crashing', () => {
-    const { getByText, getByLabelText } = render(<Login history={{}} />);
-    expect(getByText('כניסה לחשבון')).toBeTruthy();
-    expect(getByLabelText('דוא"ל')).toBeTruthy();
-    expect(getByLabelText('סיסמה')).toBeTruthy();
+  it('renders login form correctly', () => {
+    render(<Login {...props} />);
+    expect(screen.getByText('כניסה לחשבון')).toBeInTheDocument();
+    expect(screen.getByLabelText('דוא"ל')).toBeInTheDocument();
+    expect(screen.getByLabelText('סיסמה')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'כניסה' })).toBeInTheDocument();
   });
 
-  it('updates state on input change', () => {
-    const { getByLabelText } = render(<Login history={{}} />);
-    const emailInput = getByLabelText('דוא"ל');
-    const passwordInput = getByLabelText('סיסמה');
+  it('updates email and password state on input change', () => {
+    render(<Login {...props} />);
+    const emailInput = screen.getByLabelText('דוא"ל');
+    const passwordInput = screen.getByLabelText('סיסמה');
 
     fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
     fireEvent.change(passwordInput, { target: { value: 'password123' } });
@@ -71,19 +59,19 @@ describe('Login Component', () => {
   });
 
   it('calls setAlert when form is submitted with empty fields', () => {
-    const { getByText } = render(<Login history={{}} />);
-    const submitButton = getByText('כניסה');
+    render(<Login {...props} />);
+    const submitButton = screen.getByRole('button', { name: 'כניסה' });
 
     fireEvent.click(submitButton);
 
     expect(mockSetAlert).toHaveBeenCalledWith('נא למלא את כל השדות', 'danger');
   });
 
-  it('calls login when form is submitted with valid data', () => {
-    const { getByLabelText, getByText } = render(<Login history={{}} />);
-    const emailInput = getByLabelText('דוא"ל');
-    const passwordInput = getByLabelText('סיסמה');
-    const submitButton = getByText('כניסה');
+  it('calls login function when form is submitted with valid data', () => {
+    render(<Login {...props} />);
+    const emailInput = screen.getByLabelText('דוא"ל');
+    const passwordInput = screen.getByLabelText('סיסמה');
+    const submitButton = screen.getByRole('button', { name: 'כניסה' });
 
     fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
     fireEvent.change(passwordInput, { target: { value: 'password123' } });
@@ -96,19 +84,15 @@ describe('Login Component', () => {
   });
 
   it('redirects to home page when authenticated', async () => {
-    mockUseContext.mockImplementation((context) => {
-      if (context.displayName === 'AuthContext') {
-        return {
-          login: mockLogin,
-          error: null,
-          clearErrors: mockClearErrors,
-          isAuthenticated: true,
-        };
-      }
-      return { setAlert: mockSetAlert };
-    });
+    const mockAuthContext = {
+      isAuthenticated: true,
+      login: mockLogin,
+      error: null,
+      clearErrors: mockClearErrors,
+    };
+    jest.spyOn(React, 'useContext').mockImplementation(() => mockAuthContext);
 
-    render(<Login history={{ push: mockHistoryPush }} />);
+    render(<Login {...props} />);
 
     await waitFor(() => {
       expect(mockHistoryPush).toHaveBeenCalledWith('/');
@@ -116,19 +100,15 @@ describe('Login Component', () => {
   });
 
   it('displays alert when there is an error', async () => {
-    mockUseContext.mockImplementation((context) => {
-      if (context.displayName === 'AuthContext') {
-        return {
-          login: mockLogin,
-          error: 'הפרטים שהוזנו אינם תקינים.',
-          clearErrors: mockClearErrors,
-          isAuthenticated: false,
-        };
-      }
-      return { setAlert: mockSetAlert };
-    });
+    const mockAuthContext = {
+      isAuthenticated: false,
+      login: mockLogin,
+      error: 'הפרטים שהוזנו אינם תקינים.',
+      clearErrors: mockClearErrors,
+    };
+    jest.spyOn(React, 'useContext').mockImplementation(() => mockAuthContext);
 
-    render(<Login history={{}} />);
+    render(<Login {...props} />);
 
     await waitFor(() => {
       expect(mockSetAlert).toHaveBeenCalledWith('הפרטים שהוזנו אינם תקינים.', 'danger');
