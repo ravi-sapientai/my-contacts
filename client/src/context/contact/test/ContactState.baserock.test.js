@@ -23,8 +23,11 @@ jest.mock('axios');
 // Mock useReducer
 const mockDispatch = jest.fn();
 jest.mock('react', () => ({
-  ...jest.requireActual('react'),
-  useReducer: () => [{}, mockDispatch]
+  ...Object.getOwnPropertyNames(React).reduce((acc, key) => {
+    acc[key] = key === 'useReducer' ? () => [{}, mockDispatch] : jest.fn();
+    return acc;
+  }, {}),
+  createElement: React.createElement,
 }));
 
 const renderHook = (callback, options) => {
